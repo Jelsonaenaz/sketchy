@@ -180,5 +180,118 @@ function dab(x,y,p){
   if(t==="gomme"){c.globalAlpha=1;c.globalCompositeOperation="destination-out";c.beginPath();c.arc(x,y,s*1.5,0,7);c.fill();c.globalCompositeOperation="source-over";return}
   if(t==="stylo"){c.globalAlpha=1;c.fillStyle="#14161c";c.beginPath();c.arc(x,y,s*(.18+.42*p),0,7);c.fill();return}
   const d=Math.max(3,Math.round(s*(.6+.6*p)));
-  c.globalAlpha=.15+.4*p;c
+  c.globalAlpha=.15+.4*p;c.save();c.translate(x,y);c.rotate(Math.random()*7);c.drawImage(tip(d),-d/2,-d/2);c.restore();c.globalAlpha=1;
+}
+function curve(a,c,b){
+  const len=Math.hypot(c.x-a.x,c.y-a.y)+Math.hypot(b.x-c.x,b.y-c.y),n=Math.max(1,Math.ceil(len/Math.max(1,S.size*.1)));
+  for(let i=1;i<=n;i++){const t=i/n,u=1-t;dab(u*u*a.x+2*u*t*c.x+t*t*b.x,u*u*a.y+2*u*t*c.y+t*t*b.y,u*u*a.p+2*u*t*c.p+t*t*b.p)}
+}
+function push(pt){
+  if(!B.r){B.r=B.m=pt;dab(pt.x,pt.y,pt.p);return}
+  const m={x:(B.r.x+pt.x)/2,y:(B.r.y+pt.y)/2,p:(B.r.p+pt.p)/2};
+  curve(B.m,B.r,m);B.m=m;B.r=pt;
+}
+function feed(e){
+  const q=xy(e),v=Math.hypot(q.x-B.lx,q.y-B.ly)/Math.max(1,e.timeStamp-B.lt);
+  B.lx=q.x;B.ly=q.y;B.lt=e.timeStamp;
+  const tp=e.pointerType==="pen"&&e.pressure>0?e.pressure:Math.min(1,Math.max(.25,1.05-v*.35));
+  B.p+=(tp-B.p)*.3;B.sx+=(q.x-B.sx)*.5;B.sy+=(q.y-B.sy)*.5;
+  push({x:B.sx,y:B.sy,p:B.p});
+}
+function down(e){
+  if(B.d||e.button>0)return;
+  e.preventDefault();B.c.setPointerCapture(e.pointerId);
+  B.h.push(B.x.getImageData(0,0,B.c.width,B.c.height));if(B.h.length>8)B.h.shift();
+  const q=xy(e);
+  Object.assign(B,{d:1,id:e.pointerId,r:null,m:null,lx:q.x,ly:q.y,lt:e.timeStamp,sx:q.x,sy:q.y,p:.3,dirty:1});
+  push({x:q.x,y:q.y,p:B.p});
+}
+function move(e){
+  if(!B.d||e.pointerId!==B.id)return;
+  const a=e.getCoalescedEvents?e.getCoalescedEvents():[];
+  (a.length?a:[e]).forEach(feed);
+}
+function end(e){
+  if(!B.d||e.pointerId!==B.id)return;
+  B.d=0;if(B.r)curve(B.m,B.r,B.r);
+  try{B.c.releasePointerCapture(e.pointerId)}catch(x){}
+}
+function initBoard(){
+  const c=$("#cv");if(!c)return;
+  B={c,x:c.getContext("2d"),h:[],d:0,dirty:0};
+  c.onpointerdown=down;c.onpointermove=move;c.onpointerup=c.onpointercancel=end;
+  c.oncontextmenu=e=>e.preventDefault();
+  $("#sz").oninput=e=>{S.size=+e.target.value};
+}
+function board(a,b){
+  if(!B)return;
+  if(a==="b-tool"){S.tool=b.dataset.t;document.querySelectorAll("[data-a=b-tool]").forEach(x=>x.setAttribute("aria-pressed",x===b))}
+  else if(a==="b-undo"){if(B.h.length)B.x.putImageData(B.h.pop(),0,0)}
+  else if(a==="b-clear"){B.h.push(B.x.getImageData(0,0,B.c.width,B.c.height));B.x.clearRect(0,0,B.c.width,B.c.height);B.dirty=0}
+  else if(a==="b-guide"){const on=b.getAttribute("aria-pressed")!=="true";b.setAttribute("aria-pressed",on);$("#guide").style.display=on?"":"none"}
+}
+const boardV=l=>{
+  const gi=l?(S.g<0?l.s.length-1:Math.min(S.g,l.s.length-1)):0;
+  return `<p><a href="#lecons">Toutes les leçons</a></p><h1>${l?"Dessiner : "+l.n:"Dessin libre"}</h1>
+<p class="lead">${l?"Le modèle de l’étape "+(gi+1)+" est en filigrane. Dessine par-dessus avec ton doigt, ton stylet ou ta souris.":"Une feuille blanche. Dessine avec ton doigt, ton stylet ou ta souris."}</p>
+<div class="stage" style="max-width:560px"><div class="sheet">${l?`<div class="guide" id="guide">${svgOf(l,gi+1,0)}</div>`:""}<canvas id="cv" width="900" height="900" aria-label="Zone de dessin"></canvas></div></div>
+<div class="chips" style="justify-content:center">${[["crayon","Crayon"],["stylo","Stylo"],["gomme","Gomme"]].map(([k,v])=>`<button class="chip" data-a="b-tool" data-t="${k}" aria-pressed="${S.tool===k}">${v}</button>`).join("")}${l?'<button class="chip" data-a="b-guide" aria-pressed="true">Modèle</button>':""}</div>
+<div class="row"><label for="sz" style="margin:0">Taille</label><input id="sz" type="range" min="2" max="20" value="${S.size}"><button class="btn alt" data-a="b-undo">Annuler</button><button class="btn alt" data-a="b-clear">Tout effacer</button></div>
+<form class="panel" id="fd"><h2>Publier dans mon profil</h2><label for="t">Titre</label><input id="t" name="t" maxlength="60" placeholder="Mon essai"><input type="hidden" name="tag" value="${l?l.id:"autre"}"><p class="msg" role="status"></p><button class="btn">Publier ce dessin</button></form>`;
+};
 
+/* Actions */
+document.addEventListener("click",async e=>{
+  const b=e.target.closest("[data-a]");if(!b)return;
+  const a=b.dataset.a;
+  if(a==="try"){S.g=S.i;location.hash="#dessin-"+b.dataset.tag;return}
+  if(a.startsWith("b-")){board(a,b);return}
+  if(a==="step")S.i=+b.dataset.i;
+  else if(a==="pub"){S.pub=1;S.edit=0;S.tag=b.dataset.tag;if(location.hash!=="#profil"){location.hash="#profil";return}}
+  else if(a==="showpub"){S.pub=!S.pub;S.edit=0}
+  else if(a==="showedit"){S.edit=!S.edit;S.pub=0}
+  else if(a==="filter")S.f=b.dataset.f;
+  else if(a==="view"){
+    const d=D.find(x=>x.id===+b.dataset.id);if(!d)return;
+    $("#dlg").innerHTML=`<img src="${d.src}" alt="${esc(d.t)}"><h2>${esc(d.t)}</h2><p class="mute">${TAGS[d.tag]}, publié le ${new Date(d.id).toLocaleDateString("fr-FR")}</p><div class="row"><button class="btn alt" data-a="del" data-id="${d.id}">Supprimer</button><button class="btn" data-a="close">Fermer</button></div>`;
+    $("#dlg").showModal();return;
+  }
+  else if(a==="del"){
+    if(!confirm("Supprimer ce dessin ?"))return;
+    await rm(+b.dataset.id);$("#dlg").close();
+  }
+  else if(a==="close"){$("#dlg").close();return}
+  render();
+});
+
+document.addEventListener("submit",async e=>{
+  e.preventDefault();
+  const f=e.target,m=f.querySelector(".msg");
+  try{
+    if(f.id==="fd"){
+      if(!B||!B.dirty){m.textContent="Dessine d’abord quelque chose sur la feuille.";return}
+      const o=document.createElement("canvas");o.width=B.c.width;o.height=B.c.height;
+      const x=o.getContext("2d");x.fillStyle="#fbfaf6";x.fillRect(0,0,o.width,o.height);x.drawImage(B.c,0,0);
+      await put({id:Date.now(),t:f.t.value.trim()||"Sans titre",tag:f.tag.value,src:o.toDataURL("image/jpeg",.9)});
+      S.f="all";S.pub=0;S.edit=0;location.hash="#profil";return;
+    }
+    if(f.id==="fp"){
+      const file=f.img.files[0];
+      if(!file){m.textContent="Choisis d’abord l’image de ton dessin.";return}
+      const src=await shrink(file,1100);
+      await put({id:Date.now(),t:f.t.value.trim()||"Sans titre",tag:f.tag.value,src});
+      S.pub=0;S.f="all";
+    }else{
+      P.name=f.n.value.trim();P.bio=f.b.value.trim();
+      if(f.av.files[0])P.avatar=await shrink(f.av.files[0],200);
+      saveP();S.edit=0;
+    }
+    render();
+  }catch(x){m.textContent="Impossible d’enregistrer cette image. Essaie avec une autre."}
+});
+
+addEventListener("hashchange",()=>{S.i=0;render();scrollTo(0,0)});
+open().then(render);
+</script>
+</body>
+</html>
